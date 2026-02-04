@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { ProductCard } from '@/components/ProductCard'
 import { ProductFilters } from '@/components/ProductFilters'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
@@ -11,6 +11,7 @@ export default function Home() {
   const [products, setProducts] = useState<Product[]>([])
   const [filteredProducts, setFilteredProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
+  const [isFiltering, setIsFiltering] = useState(false)
   const [filters, setFilters] = useState<FilterOptions>({
     category: '',
     minPrice: undefined,
@@ -18,6 +19,10 @@ export default function Home() {
     inStock: undefined,
   })
 
+  // Debounce timer ref
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Initial load - fetch all products
   useEffect(() => {
     const fetchProducts = async () => {
       try {
@@ -35,35 +40,38 @@ export default function Home() {
     fetchProducts()
   }, [])
 
-  // BUG: This filtering logic has performance issues and incorrect logic
+  // Debounced filter effect
   useEffect(() => {
-    let filtered = [...products]
-    
-    // Inefficient: Creates new array on every render
-    filtered = products.filter(product => {
-      if (filters.category && product.category !== filters.category) {
-        return false
+    // Clear existing timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+
+    // Don't debounce on initial load
+    if (loading) return
+
+    // Set filtering state immediately for UI feedback
+    setIsFiltering(true)
+
+    // Debounce the API call by 300ms
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const data = await getProducts(filters)
+        setFilteredProducts(data)
+      } catch (error) {
+        console.error('Error filtering products:', error)
+      } finally {
+        setIsFiltering(false)
       }
-      
-      // BUG: Logic error - should be inclusive of min/max prices
-      if (filters.minPrice && product.price < filters.minPrice) {
-        return false
+    }, 300)
+
+    // Cleanup on unmount or filter change
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
       }
-      if (filters.maxPrice && product.price > filters.maxPrice) {
-        return false
-      }
-      
-      // BUG: This condition is backwards
-      if (filters.inStock !== undefined) {
-        if (filters.inStock && product.stock <= 0) return false
-        if (!filters.inStock && product.stock > 0) return false
-      }
-      
-      return true
-    })
-    
-    setFilteredProducts(filtered)
-  }, [filters, products])
+    }
+  }, [filters, loading])
 
   if (loading) {
     return <LoadingSpinner />
@@ -75,6 +83,11 @@ export default function Home() {
         <h2 className="text-2xl font-bold text-gray-900">Product Inventory</h2>
         <div className="text-sm text-gray-500">
           Showing {filteredProducts.length} of {products.length} products
+          {isFiltering && (
+            <span className="ml-2 text-primary-600 animate-pulse">
+              • Filtering...
+            </span>
+          )}
         </div>
       </div>
       

@@ -5,35 +5,40 @@ import { mockProducts } from '@/data/mockProducts'
 // Simulate API delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-// BUG: This function has memory leaks and inefficient data handling
 export async function getProducts(filters?: FilterOptions): Promise<Product[]> {
   await delay(800) // Simulate slow API
   
   let products = [...mockProducts]
   
   if (filters) {
-    // PERFORMANCE ISSUE: Multiple array iterations instead of single pass
-    if (filters.category) {
-      products = products.filter(p => p.category === filters.category)
-    }
-    
-    // BUG: Price filtering logic is incorrect
-    if (filters.minPrice) {
-      products = products.filter(p => p.price >= filters.minPrice!) // Non-null assertion is dangerous
-    }
-    
-    if (filters.maxPrice) {
-      products = products.filter(p => p.price <= filters.maxPrice!)
-    }
-    
-    // BUG: Stock filtering logic is backwards
-    if (filters.inStock !== undefined) {
-      if (filters.inStock) {
-        products = products.filter(p => p.stock <= 0) // Should be > 0
-      } else {
-        products = products.filter(p => p.stock > 0) // Should be <= 0
+    // Single-pass filtering for better performance
+    products = products.filter(product => {
+      // Category filter
+      if (filters.category && product.category !== filters.category) {
+        return false
       }
-    }
+      
+      // Price range filters
+      if (filters.minPrice !== undefined && product.price < filters.minPrice) {
+        return false
+      }
+      
+      if (filters.maxPrice !== undefined && product.price > filters.maxPrice) {
+        return false
+      }
+      
+      // Stock availability filter (FIXED: was backwards)
+      if (filters.inStock !== undefined) {
+        if (filters.inStock && product.stock <= 0) {
+          return false // In stock filter should exclude out of stock items
+        }
+        if (!filters.inStock && product.stock > 0) {
+          return false // Out of stock filter should exclude in stock items
+        }
+      }
+      
+      return true
+    })
   }
   
   return products
@@ -46,22 +51,30 @@ export async function getProduct(id: string): Promise<Product | null> {
   return product || null
 }
 
-// BUG: This function doesn't properly validate input data
 export async function createProduct(data: CreateProductRequest): Promise<ApiResponse<Product>> {
   await delay(500)
   
-  // Missing validation for required fields
+  // Validate required fields
   if (!data.name || !data.category) {
-    throw new Error('Invalid product data')
+    throw new Error('Product name and category are required')
   }
   
-  // BUG: Price validation is incorrect
-  if (data.price < 0) { // Should also check for reasonable upper bounds
-    throw new Error('Price cannot be negative')
+  if (!data.sku) {
+    throw new Error('SKU is required')
+  }
+  
+  // Validate price
+  if (data.price < 0 || data.price > 999999 || isNaN(data.price)) {
+    throw new Error('Price must be between $0 and $999,999')
+  }
+  
+  // Validate stock
+  if (data.stock < 0 || !Number.isInteger(data.stock)) {
+    throw new Error('Stock must be a non-negative integer')
   }
   
   const newProduct: Product = {
-    id: Math.random().toString(36).substr(2, 9), // BUG: Using Math.random for ID generation
+    id: crypto.randomUUID(), // Use crypto API for better ID generation
     ...data,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
